@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D 贪吃蛇</title>
+<style>
+  :root{--bg:#0f1116; --text:#e5e7eb; --muted:#94a3b8;}
+  html,body{height:100%; margin:0; background:radial-gradient(1200px 600px at 70% 10%, #111428 0%, #0b0d17 35%, var(--bg) 100%)}
+  #app{height:100%; display:grid; grid-template-columns:300px 1fr; overflow:hidden}
+  #ui{background:linear-gradient(180deg, rgba(21,25,40,.9), rgba(21,25,40,.7)); border-right:1px solid rgba(125,211,252,.15);
+      padding:18px; color:var(--text); font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  h1{font-size:18px; margin:0 0 12px; color:#fff}
+  label{display:block; font-size:12px; color:var(--muted); margin:12px 0 6px}
+  .val{font-variant-numeric:tabular-nums; color:#cbd5e1; margin-left:6px}
+  select,input[type="range"],button{width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(125,211,252,.18); background:#0e1322; color:#e5e7eb}
+  .row{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .stats{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px}
+  .card{background:linear-gradient(180deg,#0f1424,#0c1120); border:1px solid rgba(167,139,250,.18); border-radius:12px; padding:12px}
+  .big{font-size:24px; font-weight:700; color:#fff}
+  .muted{font-size:12px; color:#94a3b8}
+  .kbd{display:inline-block; border:1px solid rgba(125,211,252,.25); border-bottom-width:3px; padding:2px 6px; border-radius:6px; background:#0b1020; font-size:11px; color:#cbd5e1; margin-right:6px}
+  #canvas-wrap{position:relative}
+  #overlay{position:absolute; inset:10px 10px auto auto; display:flex; gap:8px; pointer-events:none}
+  .pill{pointer-events:auto; background:rgba(15,17,22,.7); border:1px solid rgba(167,139,250,.35); color:#e5e7eb; border-radius:999px; padding:8px 12px; font-size:12px}
+  #touchpad{position:absolute; left:12px; bottom:12px; display:grid; grid-template-columns:repeat(3,56px); gap:6px; pointer-events:none}
+  #touchpad button{pointer-events:auto; height:56px; border-radius:12px; background:rgba(14,19,34,.85); border:1px solid rgba(125,211,252,.25); color:#e5e7eb; font-weight:600}
+  #touchpad .hint{grid-column:1/-1; text-align:center; color:#94a3b8; font-size:12px}
+  .foot{position:absolute; right:12px; bottom:12px; font-size:11px; color:#64748b}
+  .errorbar{position:fixed; left:12px; top:12px; background:rgba(239,68,68,.15); color:#fecaca; border:1px solid rgba(239,68,68,.45); padding:8px 10px; border-radius:8px; font-size:12px; z-index:10; display:none}
+  @media (max-width:980px){#app{grid-template-columns:1fr} #ui{border-right:none; border-bottom:1px solid rgba(125,211,252,.15)}}
+</style>
+</head>
+<body>
+<div class="errorbar" id="errbar"></div>
+<div id="app">
+  <aside id="ui">
+    <h1>3D 贪吃蛇</h1>
+
+    <label>难度 / 形状</label>
+    <select id="shapeSelect">
+      <option value="cube">🧊 立方体（易）</option>
+      <option value="cylinder">🪵 圆柱（中）</option>
+      <option value="sphere">🪩 球体（难）</option>
+      <option value="torus">🛟 圆环（地狱）</option>
+    </select>
+
+    <label>速度（步/秒）</label>
+    <input type="range" id="speed" min="3" max="20" step="1" value="9"/>
+
+    <label>空间大小（半径 / 格）<span class="val" id="sizeVal">14</span></label>
+    <input type="range" id="size" min="8" max="22" step="1" value="14"/>
+
+    <label>边界样式</label>
+    <select id="borderStyle">
+      <option value="outline-haze-rim" selected>外轮廓 + 薄雾 + 外缘高光（最清晰）</option>
+      <option value="outline-haze">外轮廓 + 薄雾</option>
+      <option value="outline">仅外轮廓</option>
+      <option value="haze">仅薄雾</option>
+      <option value="none">不显示边界</option>
+    </select>
+
+    <label>辅助线</label>
+    <select id="guideStrength">
+      <option value="off">关闭</option>
+      <option value="low" selected>较弱</option>
+      <option value="med">中等</option>
+      <option value="high">较强</option>
+    </select>
+
+    <div class="row" style="margin-top:12px">
+      <button id="startBtn">开始 / 继续</button>
+      <button id="pauseBtn">暂停</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="resetBtn">重新开始</button>
+      <button id="centerBtn">重置视角</button>
+    </div>
+    <div class="stats">
+      <div class="card"><div class="big" id="score">0</div><div class="muted">分数</div></div>
+      <div class="card"><div class="big" id="best">0</div><div class="muted">最高分（当前难度）</div></div>
+    </div>
+
+    <div style="margin-top:12px; font-size:12px; color:#cbd5e1">
+      <div><span class="kbd">W</span><span class="kbd">S</span> 前后（±Z）</div>
+      <div><span class="kbd">A</span><span class="kbd">D</span> 左右（±X）</div>
+      <div><span class="kbd">Q</span><span class="kbd">E</span> 上下（±Y）</div>
+      <div style="margin-top:8px; color:#9ca3af">也支持方向键（X/Z 平面）。空格键：开始/暂停。</div>
+    </div>
+  </aside>
+
+  <main id="canvas-wrap">
+    <div id="overlay">
+      <button class="pill" id="statePill">就绪</button>
+      <button class="pill" id="shapePill">立方体</button>
+    </div>
+    <div id="touchpad" aria-label="touch controls">
+      <div></div><button data-dir="+z">+Z</button><div></div>
+      <button data-dir="-x">-X</button><button data-dir="-y">-Y</button><button data-dir="+x">+X</button>
+      <div></div><button data-dir="-z">-Z</button><div></div>
+      <div class="hint">点按上面 6 个方向移动（手机/平板）</div>
+    </div>
+    <div class="foot">Three.js 若加载失败也可用简易相机</div>
+  </main>
+</div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+const errbar = document.getElementById('errbar'); const showErr = m=>{errbar.style.display='block'; errbar.textContent=m; console.warn(m);};
+
+// DOM
+const wrap = document.getElementById('canvas-wrap');
+const shapeSelect = document.getElementById('shapeSelect');
+const speedSlider = document.getElementById('speed');
+const sizeSlider  = document.getElementById('size'); const sizeVal = document.getElementById('sizeVal');
+const borderStyleSel = document.getElementById('borderStyle');
+const guideStrengthSel = document.getElementById('guideStrength');
+const startBtn = document.getElementById('startBtn'); const pauseBtn = document.getElementById('pauseBtn');
+const resetBtn = document.getElementById('resetBtn'); const centerBtn = document.getElementById('centerBtn');
+const scoreEl = document.getElementById('score'); const bestEl = document.getElementById('best');
+const statePill = document.getElementById('statePill'); const shapePill = document.getElementById('shapePill');
+const touchpad = document.getElementById('touchpad');
+const shapeNames = { cube:'立方体', cylinder:'圆柱', sphere:'球体', torus:'圆环' };
+
+// Three 基础
+const renderer = new THREE.WebGLRenderer({antialias:true}); wrap.prepend(renderer.domElement);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0a0e19); scene.fog = new THREE.Fog(0x0a0e19, 80, 160);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 2000); camera.position.set(36,30,36);
+scene.add(new THREE.HemisphereLight(0xaad1ff,0x223355,0.7)); const dl = new THREE.DirectionalLight(0xffffff,0.9); dl.position.set(30,40,22); scene.add(dl);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(300,300), new THREE.MeshBasicMaterial({color:0x0c1020, transparent:true, opacity:0.7}));
+floor.rotation.x = -Math.PI/2; scene.add(floor);
+
+// 控制（OrbitControls 失败则简易相机）
+let controls=null;
+try{ const { OrbitControls } = await import('https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js');
+  controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true; controls.target.set(0,0,0);
+}catch(e){
+  let down=false,lx=0,ly=0,yaw=0.9,pitch=0.7,r=60;
+  const upd=()=>{ const cx=Math.cos(yaw)*Math.cos(pitch), cy=Math.sin(pitch), cz=Math.sin(yaw)*Math.cos(pitch); camera.position.set(cx*r,cy*r,cz*r); camera.lookAt(0,0,0); };
+  renderer.domElement.addEventListener('mousedown',e=>{down=true;lx=e.clientX;ly=e.clientY;});
+  window.addEventListener('mouseup',()=>down=false);
+  renderer.domElement.addEventListener('mousemove',e=>{ if(!down) return; yaw-=(e.clientX-lx)/300; pitch-=(e.clientY-ly)/300; pitch=Math.max(-1.2,Math.min(1.2,pitch)); lx=e.clientX; ly=e.clientY; upd();});
+  renderer.domElement.addEventListener('wheel',e=>{ r+=e.deltaY*0.05; r=Math.max(10,Math.min(300,r)); upd(); },{passive:true});
+  renderer.domElement.addEventListener('dblclick',()=>{ r=60; yaw=0.9; pitch=0.7; upd();});
+  upd();
+}
+
+// 尺寸自适应
+function resizeToWrap(){ const r=wrap.getBoundingClientRect(); renderer.setSize(r.width,r.height); camera.aspect=r.width/r.height; camera.updateProjectionMatrix(); }
+resizeToWrap(); window.addEventListener('resize', resizeToWrap);
+
+// ========= Fresnel 外缘材质（轮廓高光）
+function makeFresnelRimMesh(geometry, color = 0x9be8ff, power = 2.2, maxOpacity = 0.35, scale = 1.012){
+  const vShader = `
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+    void main(){
+      vNormal = normalize(normalMatrix * normal);
+      vec4 wp = modelMatrix * vec4(position,1.0);
+      vWorldPos = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `;
+  const fShader = `
+    uniform vec3  uColor;
+    uniform float uPower;
+    uniform float uMaxOpacity;
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+
+    void main(){
+      vec3 V = normalize(cameraPosition - vWorldPos);
+      float rim = pow(1.0 - abs(dot(normalize(vNormal), V)), uPower);
+      float dist = length(cameraPosition - vWorldPos);
+      float atten = clamp(1.0 - dist/900.0, 0.0, 1.0);
+      float alpha = uMaxOpacity * rim * atten;
+      gl_FragColor = vec4(uColor, alpha);
+    }
+  `;
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: vShader,
+    fragmentShader: fShader,
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uPower: { value: power },
+      uMaxOpacity: { value: maxOpacity }
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.BackSide,
+    blending: THREE.NormalBlending
+  });
+  const geo = geometry.clone(); geo.scale(scale, scale, scale);
+  return new THREE.Mesh(geo, mat);
+}
+
+// ========= 形状参数（唯一来源）
+function paramsCube(){ return { half: HALF }; }
+function paramsCylinder(){ return { R: HALF, H: HALF }; }
+function paramsSphere(){ return { R: HALF }; }
+function torusParams(){
+  const H = HALF;
+  const R = Math.max(6, Math.round(H * 0.70));  // 主半径
+  const r = Math.max(3, Math.round(H * 0.33));  // 管半径
+  return { R, r };
+}
+
+// ========= 游戏变量
+let HALF = Number(sizeSlider.value); sizeVal.textContent = HALF;
+let shape = 'cube';
+let snake=[], dirVec={x:1,y:0,z:0}, pending=null, food=null, cells=[], occ=new Set();
+let running=false, over=false, score=0, sps=Number(speedSlider.value), acc=0, lastT=performance.now();
+
+// ====== 合法性判定（与显示参数完全一致）
+function inside(x,y,z){
+  if(shape==='cube'){ const {half}=paramsCube(); return Math.abs(x)<=half && Math.abs(y)<=half && Math.abs(z)<=half; }
+  if(shape==='sphere'){ const {R}=paramsSphere(); return x*x+y*y+z*z<=R*R + 1e-6; }
+  if(shape==='cylinder'){ const {R,H}=paramsCylinder(); return (x*x+z*z)<=R*R + 1e-6 && Math.abs(y)<=H + 1e-6; }
+  if(shape==='torus'){ const {R,r}=torusParams(); const rho=Math.hypot(x,z); return (rho-R)*(rho-R)+y*y <= r*r + 1e-6; }
+  return false;
+}
+
+// 采样格（圆环扩大范围以覆盖管道）
+function computeCells(){
+  let min = -HALF, max = HALF;
+  if(shape==='torus'){
+    const { r } = torusParams();
+    const pad = Math.ceil(r + 1);
+    min -= pad; max += pad;
+  }
+  const out=[];
+  for(let x=min;x<=max;x++)for(let y=min;y<=max;y++)for(let z=min;z<=max;z++)
+    if(inside(x,y,z)) out.push({x,y,z});
+  return out;
+}
+
+// ====== 边界 & 辅助线
+let boundaryGroup = new THREE.Group(); scene.add(boundaryGroup);
+function clearGroup(g){ g.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); } }); }
+function shapeGeometry(){
+  if(shape==='cube'){ const {half}=paramsCube(); return new THREE.BoxGeometry(half*2, half*2, half*2); }
+  if(shape==='sphere'){ const {R}=paramsSphere(); return new THREE.SphereGeometry(R, 40, 28); }
+  if(shape==='cylinder'){ const {R,H}=paramsCylinder(); return new THREE.CylinderGeometry(R, R, H*2, 64, 1, true); }
+  if(shape==='torus'){ const {R,r}=torusParams(); return new THREE.TorusGeometry(R, r, 28, 120); }
+}
+
+// —— 辅助线（强度可调，全部使用同一参数）
+function buildGuides(group, shape, gstrength){
+  if(gstrength === 'off') return;
+  const cfg = {
+    low:  { rings: 2, meridians: 2, verts: 4, opacity: 0.14 },
+    med:  { rings: 4, meridians: 4, verts: 6, opacity: 0.18 },
+    high: { rings: 6, meridians: 6, verts: 8, opacity: 0.22 }
+  }[gstrength] || { rings: 3, meridians: 3, verts: 5, opacity: 0.16 };
+  const makeMat = (op)=> new THREE.LineBasicMaterial({ color:0x86e4ff, transparent:true, opacity:op, depthWrite:false });
+
+  if(shape === 'cylinder'){
+    const {R,H}=paramsCylinder(); const op=cfg.opacity;
+    for(let i=1;i<=cfg.rings;i++){
+      const t=i/(cfg.rings+1), y=-H + t*(H*2);
+      const g=new THREE.CircleGeometry(R,90);
+      const loop=new THREE.LineLoop(new THREE.EdgesGeometry(g), makeMat(op));
+      loop.rotation.x=-Math.PI/2; loop.position.y=y; group.add(loop);
+    }
+    for(let i=0;i<cfg.verts;i++){
+      const ang=i*(Math.PI*2/cfg.verts), x=R*Math.cos(ang), z=R*Math.sin(ang);
+      const geom=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x,-H,z),new THREE.Vector3(x,H,z)]);
+      group.add(new THREE.Line(geom, makeMat(op*0.85)));
+    }
+  } else if(shape==='sphere'){
+    const {R}=paramsSphere(); const op=cfg.opacity;
+    for(let i=1;i<=cfg.rings;i++){
+      const t=i/(cfg.rings+1), y=-R + t*(R*2);
+      const r=Math.sqrt(Math.max(0,R*R - y*y)); if(r<0.2) continue;
+      const g=new THREE.CircleGeometry(r,120);
+      const loop=new THREE.LineLoop(new THREE.EdgesGeometry(g), makeMat(op));
+      loop.rotation.x=-Math.PI/2; loop.position.y=y; group.add(loop);
+    }
+    for(let i=0;i<cfg.meridians;i++){
+      const ang=i*(Math.PI/cfg.meridians);
+      const g=new THREE.CircleGeometry(R,120);
+      const loop=new THREE.LineLoop(new THREE.EdgesGeometry(g), makeMat(op*0.9));
+      loop.rotation.y=ang; group.add(loop);
+    }
+  } else if(shape==='cube'){
+    const {half: s}=paramsCube(); const op=cfg.opacity*0.9, mat=makeMat(op);
+    const addCross=(center,uDir,vDir)=>{
+      const L=(s*2)*0.88;
+      const u0=center.clone().add(uDir.clone().multiplyScalar(-L/2));
+      const u1=center.clone().add(uDir.clone().multiplyScalar( L/2));
+      const v0=center.clone().add(vDir.clone().multiplyScalar(-L/2));
+      const v1=center.clone().add(vDir.clone().multiplyScalar( L/2));
+      group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([u0,u1]),mat));
+      group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([v0,v1]),mat));
+    };
+    addCross(new THREE.Vector3( s,0,0), new THREE.Vector3(0,1,0), new THREE.Vector3(0,0,1));
+    addCross(new THREE.Vector3(-s,0,0), new THREE.Vector3(0,1,0), new THREE.Vector3(0,0,1));
+    addCross(new THREE.Vector3(0, s,0), new THREE.Vector3(1,0,0), new THREE.Vector3(0,0,1));
+    addCross(new THREE.Vector3(0,-s,0), new THREE.Vector3(1,0,0), new THREE.Vector3(0,0,1));
+    addCross(new THREE.Vector3(0,0, s), new THREE.Vector3(1,0,0), new THREE.Vector3(0,1,0));
+    addCross(new THREE.Vector3(0,0,-s), new THREE.Vector3(1,0,0), new THREE.Vector3(0,1,0));
+  } else if(shape==='torus'){
+    const {R,r}=torusParams(); const op=cfg.opacity*0.95;
+    const U=Math.max(80, Math.round(6*R));
+    const V=Math.max(60, Math.round(4*r));
+    for(let i=0;i<Math.max(3,cfg.rings);i++){
+      const vv=-Math.PI + i*(2*Math.PI/Math.max(3,cfg.rings));
+      const pts=[]; for(let j=0;j<=U;j++){ const u=j*(2*Math.PI/U);
+        const x=(R + r*Math.cos(vv))*Math.cos(u);
+        const y= r*Math.sin(vv);
+        const z=(R + r*Math.cos(vv))*Math.sin(u);
+        pts.push(new THREE.Vector3(x,y,z));
+      }
+      group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), makeMat(op)));
+    }
+    for(let i=0;i<Math.max(4,cfg.meridians);i++){
+      const uu=i*(2*Math.PI/Math.max(4,cfg.meridians));
+      const pts=[]; for(let j=0;j<=V;j++){ const v=-Math.PI + j*(2*Math.PI/V);
+        const x=(R + r*Math.cos(v))*Math.cos(uu);
+        const y= r*Math.sin(v);
+        const z=(R + r*Math.cos(v))*Math.sin(uu);
+        pts.push(new THREE.Vector3(x,y,z));
+      }
+      group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), makeMat(op*0.9)));
+    }
+  }
+}
+
+// —— 可视边界（几何与判定完全一致；薄雾仅轻微放大制造柔边）
+function buildBoundary(){
+  scene.remove(boundaryGroup); clearGroup(boundaryGroup); boundaryGroup = new THREE.Group();
+
+  const style = borderStyleSel.value;
+  const gstrength = guideStrengthSel.value;
+  if(style==='none' && gstrength==='off'){ floor.position.y = -HALF - 1.4; scene.add(boundaryGroup); return; }
+
+  const geo = shapeGeometry();
+
+  if(style.includes('outline')){
+    const edgesGeo = new THREE.EdgesGeometry(geo, 35);
+    const edgesMat = new THREE.LineBasicMaterial({ color:0x86e4ff, transparent:true, opacity:0.35, depthTest:true, depthWrite:false });
+    boundaryGroup.add(new THREE.LineSegments(edgesGeo, edgesMat));
+    if(shape==='cylinder'){
+      const {R,H}=paramsCylinder();
+      const ringGeo = new THREE.RingGeometry(R*0.999, R, 96);
+      const ringMat = new THREE.LineBasicMaterial({ color:0x86e4ff, transparent:true, opacity:0.28, depthWrite:false });
+      const top = new THREE.LineLoop(new THREE.EdgesGeometry(ringGeo), ringMat);
+      top.rotation.x=-Math.PI/2; top.position.y= H; boundaryGroup.add(top);
+      const bottom = top.clone(); bottom.position.y=-H; boundaryGroup.add(bottom);
+    }
+  }
+  if(style.includes('haze')){
+    const hazeGeo = geo.clone(); hazeGeo.scale(1.01,1.01,1.01); // 轻微放大，制造柔边
+    const hazeMat = new THREE.MeshBasicMaterial({ color:0x7dd3fc, transparent:true, opacity:0.05, depthWrite:false, side:THREE.BackSide });
+    boundaryGroup.add(new THREE.Mesh(hazeGeo, hazeMat));
+    if(shape==='cylinder'){
+      const {R,H}=paramsCylinder();
+      const capMat = new THREE.MeshBasicMaterial({ color:0x7dd3fc, transparent:true, opacity:0.04, side:THREE.DoubleSide, depthWrite:false });
+      const capTop = new THREE.Mesh(new THREE.CircleGeometry(R, 64), capMat);
+      capTop.rotation.x=-Math.PI/2; capTop.position.y= H; boundaryGroup.add(capTop);
+      const capBottom = capTop.clone(); capBottom.position.y=-H; boundaryGroup.add(capBottom);
+    }
+  }
+  if(style.includes('rim')) boundaryGroup.add(makeFresnelRimMesh(geo, 0x9be8ff, 2.2, 0.38, 1.012));
+
+  buildGuides(boundaryGroup, shape, gstrength);
+
+  if(shape==='cylinder' || shape==='sphere'){
+    const y = -HALF - 0.4;
+    const mat = new THREE.LineBasicMaterial({ color:0x86e4ff, transparent:true, opacity:0.16, depthWrite:false });
+    const radius = (shape==='cylinder') ? (paramsCylinder().R) : (paramsSphere().R*0.96);
+    const circleGeo = new THREE.CircleGeometry(radius, 96);
+    const circle = new THREE.LineLoop(new THREE.EdgesGeometry(circleGeo), mat);
+    circle.rotation.x = -Math.PI/2; circle.position.y = y; boundaryGroup.add(circle);
+  }
+
+  floor.position.y = -HALF - 1.4;
+  scene.add(boundaryGroup);
+}
+
+// ====== 蛇/食物
+const snakeGeom = new THREE.BoxGeometry(0.92,0.92,0.92);
+const snakeMat  = new THREE.MeshStandardMaterial({ color:0x93c5fd, metalness:0.2, roughness:0.35, emissive:0x1f2b5c, emissiveIntensity:0.25 });
+const snakeMesh = new THREE.InstancedMesh(snakeGeom, snakeMat, 5000); snakeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(snakeMesh);
+const foodMesh  = new THREE.Mesh(new THREE.SphereGeometry(0.45,20,16), new THREE.MeshStandardMaterial({color:0xf472b6, emissive:0xaa1455, emissiveIntensity:0.65, metalness:0.2, roughness:0.2}));
+scene.add(foodMesh);
+
+const key = p => `${p.x},${p.y},${p.z}`;
+function updateSnakeMesh(){
+  const m=new THREE.Matrix4(), q=new THREE.Quaternion();
+  snakeMat.emissiveIntensity = 0.25 + 0.12*Math.sin(performance.now()/300);
+  for(let i=0;i<snake.length;i++){ const s=snake[i]; m.compose(new THREE.Vector3(s.x,s.y,s.z), q, new THREE.Vector3(1,1,1)); snakeMesh.setMatrixAt(i,m); }
+  snakeMesh.count = snake.length; snakeMesh.instanceMatrix.needsUpdate = true;
+}
+function placeFood(){
+  let tries=0; while(tries++<20000){
+    const c = cells[(Math.random()*cells.length)|0];
+    if(!occ.has(key(c))){ food={...c}; foodMesh.position.set(c.x,c.y,c.z); return; }
+  }
+  setState(false,true,"🟣 空间占满，胜利！");
+}
+function setState(run, gameOver=false, msg=null){ running=run; over=gameOver; statePill.textContent = msg || (gameOver ? "💀 游戏结束" : (run ? "▶️ 进行中" : "⏸ 已暂停")); }
+function updateScore(add){ score+=add; scoreEl.textContent=score; const k='3dsn-best-'+shape, best=Number(localStorage.getItem(k)||0); if(score>best){ localStorage.setItem(k, String(score)); bestEl.textContent=score; } }
+function refreshBest(){ bestEl.textContent = Number(localStorage.getItem('3dsn-best-'+shape)||0); }
+
+function newGame(nextShape=shape){
+  shape = nextShape;
+  shapePill.textContent = shapeNames[shape];
+  cells = computeCells();
+  buildBoundary();
+
+  occ.clear(); snake.length=0; score=0; scoreEl.textContent='0'; refreshBest();
+
+  // 出生点：圆环选 (R,0,0) 附近最近合法格；其他形状选离原点最近
+  let start={x:0,y:0,z:0};
+  if(shape==='torus'){
+    const {R}=torusParams(); let best=null, bestD2=Infinity;
+    for(const c of cells){ const d2=(c.x - R)*(c.x - R) + c.y*c.y + c.z*c.z; if(d2<bestD2){bestD2=d2; best=c;} }
+    start = best || start;
+  }else{
+    let best=null, bestD2=Infinity;
+    for(const c of cells){ const d2=c.x*c.x + c.y*c.y + c.z*c.z; if(d2<bestD2){bestD2=d2; best=c;} }
+    start = best || start;
+  }
+
+  dirVec={x:1,y:0,z:0}; pending=null;
+  for(let i=0;i<4;i++){ const p={x:start.x-i,y:start.y,z:start.z}; snake.push(p); occ.add(key(p)); }
+  updateSnakeMesh(); placeFood(); setState(false,false,"就绪"); over=false; acc=0; lastT=performance.now();
+
+  // 速度以滑块为准
+  sps = Number(speedSlider.value);
+
+  // 相机距离随空间大小自动贴近
+  const dist = Math.max(18, HALF * 2.4);
+  const len=new THREE.Vector3().copy(camera.position).setLength(dist);
+  camera.position.copy(len); if(controls) controls.update();
+}
+
+// 输入/UI
+function queue(dx,dy,dz){ pending={x:dx,y:dy,z:dz}; }
+window.addEventListener('keydown', e=>{
+  if(e.repeat) return;
+  const map={KeyW:[0,0,1],KeyS:[0,0,-1],KeyA:[-1,0,0],KeyD:[1,0,0],KeyQ:[0,1,0],KeyE:[0,-1,0],
+             ArrowLeft:[-1,0,0],ArrowRight:[1,0,0],ArrowUp:[0,0,1],ArrowDown:[0,0,-1]};
+  if(map[e.code]) queue(...map[e.code]);
+  if(e.code==='Space'){ if(over){ newGame(shape); setState(true); } else setState(!running); }
+});
+touchpad.querySelectorAll('button[data-dir]').forEach(b=>{
+  b.addEventListener('click', ()=>{ const d=b.getAttribute('data-dir');
+    if(d==='+x') queue(1,0,0); if(d==='-x') queue(-1,0,0);
+    if(d==='+y') queue(0,1,0); if(d==='-y') queue(0,-1,0);
+    if(d==='+z') queue(0,0,1); if(d==='-z') queue(0,0,-1);
+  });
+});
+
+startBtn.onclick=()=>{ if(over){ newGame(shape); } setState(true); };
+pauseBtn.onclick=()=> setState(false);
+resetBtn.onclick=()=> newGame(shape);
+centerBtn.onclick=()=>{ if(controls){ controls.reset(); controls.target.set(0,0,0);} camera.position.set(36,30,36); };
+
+shapeSelect.onchange = e=> newGame(e.target.value);
+speedSlider.oninput = e=> sps = Number(e.target.value);
+speedSlider.onchange = speedSlider.oninput;
+sizeSlider.oninput  = e=>{ HALF = Number(e.target.value); sizeVal.textContent = HALF; newGame(shape); };
+borderStyleSel.onchange = ()=> buildBoundary();
+guideStrengthSel.onchange = ()=> buildBoundary();
+
+// 主循环
+function step(){
+  if(over) return;
+  if(pending && !(pending.x===-dirVec.x && pending.y===-dirVec.y && pending.z===-dirVec.z)){
+    const h=snake[0], n={x:h.x+pending.x,y:h.y+pending.y,z:h.z+pending.z}; if(inside(n.x,n.y,n.z)) dirVec=pending; pending=null;
+  }
+  const h=snake[0], nx={x:h.x+dirVec.x,y:h.y+dirVec.y,z:h.z+dirVec.z};
+  if(!inside(nx.x,nx.y,nx.z) || occ.has(key(nx))){ setState(false,true); return; }
+  snake.unshift(nx); occ.add(key(nx));
+  if(food && nx.x===food.x && nx.y===food.y && nx.z===food.z){ updateScore(10); placeFood(); } else { const tail=snake.pop(); occ.delete(key(tail)); }
+  updateSnakeMesh();
+}
+function animate(t){
+  requestAnimationFrame(animate);
+  const dt=Math.min(0.06,(t-lastT)/1000); lastT=t;
+  if(running && !over){ const st=1/Number(sps); acc+=dt; while(acc>=st){ step(); acc-=st; } }
+  if(food){ const s=0.95+0.05*Math.sin(t/220); foodMesh.scale.set(s,s,s); }
+  if(controls) controls.update(); renderer.render(scene,camera);
+}
+
+// 启动
+newGame('cube'); animate(performance.now());
+window.addEventListener('error', e=> showErr('错误：'+(e.message||'脚本加载失败')));
+window.addEventListener('unhandledrejection', e=> showErr('模块加载失败：'+(e.reason?.message||'未知')));
+</script>
+</body>
+</html>
