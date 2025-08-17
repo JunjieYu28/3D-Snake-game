@@ -1,2 +1,2 @@
 # 3D-Snake-game
-3D Snake Game
+Click index.html to start!
